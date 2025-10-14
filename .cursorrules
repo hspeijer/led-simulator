@@ -1,0 +1,33 @@
+# Cursor AI Rules for LED Simulator Project
+
+## Development Server Management
+
+**NEVER start or restart the development server** (`yarn dev`, `npm run dev`, `next dev`, etc.)
+- The user will manage the dev server themselves
+- Do not run commands like `yarn dev`, `npm start`, or any server-starting commands
+- Do not run servers in the background
+- If suggesting fixes that require a restart, inform the user to restart manually
+
+## Allowed Commands
+
+You MAY run:
+- `yarn install` / `yarn add` - Installing dependencies
+- `yarn build` - Building for production (to verify compilation)
+- File operations (read, write, delete, etc.)
+- Linting and type checking
+- Git operations
+- Testing commands
+
+## Communication
+
+When changes require a server restart:
+- ✅ Say: "Please restart your dev server with `yarn dev`"
+- ❌ Don't: Actually run `yarn dev` or restart the server
+
+## Background Processes
+
+- Never run commands with `is_background: true` for servers
+- Never use `timeout` with server commands
+- Never use `nohup`, `&`, or similar background execution for servers
+
+

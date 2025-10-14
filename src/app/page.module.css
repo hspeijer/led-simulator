@@ -75,6 +75,29 @@
   overflow: hidden;
 }
 
+.shapeSection {
+  display: flex;
+  flex-direction: column;
+  height: 40%;
+  border-bottom: 1px solid #333;
+}
+
+.shapeEditorWrapper {
+  flex: 1;
+  overflow: hidden;
+}
+
+.animationSection {
+  display: flex;
+  flex-direction: column;
+  height: 60%;
+}
+
+.animationEditorWrapper {
+  flex: 1;
+  overflow: hidden;
+}
+
 .visualizationPanel {
   width: 50%;
   height: 100%;

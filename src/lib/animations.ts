@@ -6,9 +6,9 @@ import { LED } from '@/types/led';
 
 // Rainbow wave animation
 export const rainbowWave = `// Rainbow Wave Animation
-function animate(leds, time) {
+function animate(leds, time, shape) {
   leds.forEach((led, index) => {
-    const hue = (index / leds.length + time * 0.0005) % 1.0;
+    const hue = (index / shape.totalLEDs + time * 0.0005) % 1.0;
     const rgb = hslToRgb(hue, 1.0, 0.5);
     led.color.r = rgb.r;
     led.color.g = rgb.g;
@@ -40,7 +40,7 @@ function hslToRgb(h, s, l) {
 
 // Pulse animation
 export const pulse = `// Pulse Animation
-function animate(leds, time) {
+function animate(leds, time, shape) {
   const intensity = (Math.sin(time * 0.003) + 1) / 2;
   const r = Math.floor(intensity * 255);
   const g = Math.floor(intensity * 100);
@@ -55,12 +55,12 @@ function animate(leds, time) {
 
 // Running lights
 export const runningLights = `// Running Lights Animation
-function animate(leds, time) {
-  const position = (time * 0.05) % leds.length;
+function animate(leds, time, shape) {
+  const position = (time * 0.05) % shape.totalLEDs;
   
   leds.forEach((led, index) => {
     const distance = Math.abs(index - position);
-    const wrappedDistance = Math.min(distance, leds.length - distance);
+    const wrappedDistance = Math.min(distance, shape.totalLEDs - distance);
     const intensity = Math.max(0, 1 - wrappedDistance / 5);
     
     led.color.r = Math.floor(intensity * 255);
@@ -71,10 +71,15 @@ function animate(leds, time) {
 
 // Fire effect
 export const fire = `// Fire Effect Animation
-function animate(leds, time) {
-  leds.forEach((led, index) => {
+function animate(leds, time, shape) {
+  // Find min/max Y for this shape
+  const minY = Math.min(...leds.map(l => l.position.y));
+  const maxY = Math.max(...leds.map(l => l.position.y));
+  const range = maxY - minY || 1;
+  
+  leds.forEach((led) => {
     const flicker = Math.random() * 0.3 + 0.7;
-    const yFactor = (led.position.y + 25) / 50;
+    const yFactor = (led.position.y - minY) / range;
     const intensity = flicker * yFactor;
     
     led.color.r = Math.floor(intensity * 255);
@@ -85,7 +90,7 @@ function animate(leds, time) {
 
 // Sparkle effect
 export const sparkle = `// Sparkle Effect Animation
-function animate(leds, time) {
+function animate(leds, time, shape) {
   leds.forEach((led) => {
     if (Math.random() < 0.02) {
       led.color.r = 255;

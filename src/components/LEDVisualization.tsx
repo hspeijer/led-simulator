@@ -4,22 +4,25 @@ import { useRef, useEffect, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import { LED } from '@/types/led';
+import { LED, LEDShape } from '@/types/led';
 
 interface LEDPointsProps {
   leds: LED[];
-  animationFn: ((leds: LED[], time: number) => void) | null;
+  shape: LEDShape | null;
+  animationFn: ((leds: LED[], time: number, shape: LEDShape) => void) | null;
 }
 
-function LEDPoints({ leds, animationFn }: LEDPointsProps) {
+function LEDPoints({ leds, shape, animationFn }: LEDPointsProps) {
   const pointsRef = useRef<THREE.Points>(null);
   const startTime = useRef(Date.now());
   const ledsRef = useRef<LED[]>(leds);
+  const shapeRef = useRef<LEDShape | null>(shape);
 
-  // Update leds reference when it changes
+  // Update leds and shape references when they change
   useEffect(() => {
     ledsRef.current = leds;
-  }, [leds]);
+    shapeRef.current = shape;
+  }, [leds, shape]);
 
   // Create geometry and initial colors
   const { geometry, colors } = useMemo(() => {
@@ -44,12 +47,12 @@ function LEDPoints({ leds, animationFn }: LEDPointsProps) {
   }, [leds]);
 
   useFrame(() => {
-    if (!pointsRef.current || !animationFn) return;
+    if (!pointsRef.current || !animationFn || !shapeRef.current) return;
 
     const elapsed = Date.now() - startTime.current;
     
-    // Run the animation function
-    animationFn(ledsRef.current, elapsed);
+    // Run the animation function with shape parameter
+    animationFn(ledsRef.current, elapsed, shapeRef.current);
 
     // Update colors
     const colorAttribute = pointsRef.current.geometry.getAttribute('color') as THREE.BufferAttribute;
@@ -89,10 +92,11 @@ function WireframeCube({ size }: { size: number }) {
 
 interface LEDVisualizationProps {
   leds: LED[];
-  animationFn: ((leds: LED[], time: number) => void) | null;
+  shape: LEDShape | null;
+  animationFn: ((leds: LED[], time: number, shape: LEDShape) => void) | null;
 }
 
-export default function LEDVisualization({ leds, animationFn }: LEDVisualizationProps) {
+export default function LEDVisualization({ leds, shape, animationFn }: LEDVisualizationProps) {
   return (
     <div style={{ width: '100%', height: '100%', background: '#000' }}>
       <Canvas
@@ -104,7 +108,7 @@ export default function LEDVisualization({ leds, animationFn }: LEDVisualization
         <pointLight position={[10, 10, 10]} />
         
         <WireframeCube size={50} />
-        <LEDPoints leds={leds} animationFn={animationFn} />
+        <LEDPoints leds={leds} shape={shape} animationFn={animationFn} />
         
         <OrbitControls
           enableDamping

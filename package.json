@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "next lint"
   },
+  "resolutions": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
     "@react-three/drei": "^9.114.3",

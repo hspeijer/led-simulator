@@ -27,11 +27,23 @@ export interface LED {
   localIndex: number; // Index within the strip
 }
 
-export type AnimationFunction = (leds: LED[], time: number) => void;
+export type AnimationFunction = (leds: LED[], time: number, shape: LEDShape) => void;
 
 export interface AnimationPattern {
   name: string;
   code: string;
   fn: AnimationFunction;
+}
+
+export interface SavedPattern {
+  name: string;
+  code: string;
+  timestamp: number;
+}
+
+export interface SavedShape {
+  name: string;
+  code: string;
+  timestamp: number;
 }
 

@@ -5,11 +5,19 @@ A Next.js application for simulating and visualizing LED animation patterns in 3
 ## Features
 
 - **3D Visualization**: Real-time LED animation rendering using Three.js and React Three Fiber
-- **Live Code Editor**: Monaco editor for writing and editing animation patterns in JavaScript
+- **Dual Live Editors**: Two Monaco editors (VS Code) for editing both shapes and animations
+  - **Shape Editor** (top): Define and edit LED strip layouts using the DSL
+  - **Animation Editor** (bottom): Write animation patterns in JavaScript
 - **DSL for LED Shapes**: Domain-specific language for defining LED strip layouts as graphs with directional vectors
-- **Pre-built Patterns**: Includes sample animations like Rainbow Wave, Pulse, Running Lights, Fire Effect, and Sparkle
-- **Cube Demo**: Visualizes a cube with 50 LEDs per edge (12 edges = 600 total LEDs)
-- **Split-screen Layout**: Code editor on the left, 3D visualization on the right
+- **Pre-built Shapes**: 7 sample shapes (Cube, Line, Square, Pyramid, Helix, Star, Sphere)
+- **Pre-built Patterns**: 5 sample animations (Rainbow Wave, Pulse, Running Lights, Fire Effect, Sparkle)
+- **Linked System**: Animation patterns automatically work with the currently selected shape
+- **Persistence**: Save/load custom shapes and animations using localStorage
+  - 💾 Save button to store your creations
+  - 🗑️ Delete button for custom items
+  - Auto-restore last session on reload
+- **Shape Parameter in Animations**: Access shape properties (name, LED count, strips) in animation code
+- **Split-screen Layout**: Dual editors on the left, 3D visualization on the right
 
 ## Getting Started
 
@@ -24,6 +32,33 @@ yarn dev
 ```
 
 3. Open [http://localhost:3000](http://localhost:3000) in your browser
+
+## User Guide
+
+See the documentation for detailed guides:
+- [USAGE_GUIDE.md](USAGE_GUIDE.md) - Complete tutorial and interface guide
+- [PERSISTENCE.md](PERSISTENCE.md) - Save/load features and shape parameter
+- [SHAPE_DSL.md](SHAPE_DSL.md) - Shape definition language reference
+- [ANIMATION_GUIDE.md](ANIMATION_GUIDE.md) - Animation examples and patterns
+
+## How It Works
+
+The application has a **dual-editor system**:
+
+1. **Shape Editor** (top left): Edit the 3D shape definition
+   - Select from preset shapes or write custom ones
+   - Uses the shape DSL with `createStrip()`, `buildShape()`, and `createCube()`
+   - Real-time compilation and visualization
+   
+2. **Animation Editor** (bottom left): Edit the animation pattern
+   - Select from preset animations or write custom ones
+   - Animations automatically apply to the current shape
+   - Access to all LEDs with positions and colors
+
+3. **3D Visualization** (right): See the result in real-time
+   - Rotate, zoom, and pan with mouse
+   - LEDs update at 60 FPS
+   - Info panel shows shape statistics
 
 ## Architecture
 
@@ -46,12 +81,14 @@ The LED shape DSL is based on the following concepts:
 
 Animations are JavaScript functions with the signature:
 ```javascript
-function animate(leds, time) {
+function animate(leds, time, shape) {
   // leds: Array of LED objects
   // time: Elapsed time in milliseconds
+  // shape: The current LED shape object
   
   leds.forEach((led, index) => {
     // Modify led.color.r, led.color.g, led.color.b (0-255)
+    // Access shape.name, shape.totalLEDs, shape.strips
   });
 }
 ```
@@ -76,16 +113,18 @@ const shape = buildShape('MyShape', strips);
 ```
 src/
 ├── app/
-│   ├── page.tsx          # Main application page
+│   ├── page.tsx          # Main application page with dual editors
 │   ├── layout.tsx        # Root layout
 │   ├── globals.css       # Global styles
 │   └── page.module.css   # Page-specific CSS module
 ├── components/
 │   ├── LEDVisualization.tsx  # Three.js 3D rendering component
-│   └── CodeEditor.tsx        # Monaco editor wrapper
+│   ├── CodeEditor.tsx        # Monaco editor wrapper (animations)
+│   └── ShapeEditor.tsx       # Monaco editor wrapper (shapes)
 ├── lib/
 │   ├── shapeBuilder.ts   # DSL for creating LED shapes
-│   └── animations.ts     # Sample animation patterns
+│   ├── shapes.ts         # Preset shape definitions
+│   └── animations.ts     # Preset animation patterns
 └── types/
     └── led.ts           # TypeScript type definitions
 ```
@@ -93,6 +132,7 @@ src/
 ## Technologies
 
 - **Next.js 14**: React framework with App Router
+- **React 18**: UI library
 - **TypeScript**: Type safety and better DX
 - **Three.js**: 3D graphics library
 - **React Three Fiber**: React renderer for Three.js
