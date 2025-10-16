@@ -7,7 +7,7 @@ This guide explains how to create custom LED animations for the LED Simulator.
 Every animation must define an `animate` function with this signature:
 
 ```javascript
-function animate(leds, time) {
+function animate(leds, frame, shape) {
   // Your animation logic here
 }
 ```
@@ -21,14 +21,19 @@ function animate(leds, time) {
   - `localIndex`: Index within its strip
   - `stripId`: String identifier of the strip this LED belongs to
 
-- **time**: Elapsed time in milliseconds since animation start
+- **frame**: Frame number (incremented each animation tick, ~60fps)
+
+- **shape**: The LED shape object with:
+  - `name`: Name of the shape
+  - `strips`: Array of LED strips
+  - `totalLEDs`: Total number of LEDs in the shape
 
 ## Examples
 
 ### 1. Simple Solid Color
 
 ```javascript
-function animate(leds, time) {
+function animate(leds, frame, shape) {
   leds.forEach((led) => {
     led.color.r = 255;
     led.color.g = 0;
@@ -40,8 +45,8 @@ function animate(leds, time) {
 ### 2. Breathing Effect
 
 ```javascript
-function animate(leds, time) {
-  const intensity = (Math.sin(time * 0.003) + 1) / 2;
+function animate(leds, frame, shape) {
+  const intensity = (Math.sin(frame * 0.05) + 1) / 2;
   const value = Math.floor(intensity * 255);
   
   leds.forEach((led) => {
@@ -55,7 +60,7 @@ function animate(leds, time) {
 ### 3. Position-based Gradient
 
 ```javascript
-function animate(leds, time) {
+function animate(leds, frame, shape) {
   const minY = Math.min(...leds.map(l => l.position.y));
   const maxY = Math.max(...leds.map(l => l.position.y));
   const range = maxY - minY;
@@ -72,9 +77,9 @@ function animate(leds, time) {
 ### 4. Wave Effect
 
 ```javascript
-function animate(leds, time) {
+function animate(leds, frame, shape) {
   leds.forEach((led) => {
-    const wave = Math.sin(led.index * 0.1 + time * 0.005);
+    const wave = Math.sin(led.index * 0.1 + frame * 0.1);
     const intensity = (wave + 1) / 2;
     
     led.color.r = Math.floor(intensity * 255);
@@ -87,8 +92,8 @@ function animate(leds, time) {
 ### 5. Strip-based Animation
 
 ```javascript
-function animate(leds, time) {
-  const activeStrip = Math.floor(time * 0.001) % 12;
+function animate(leds, frame, shape) {
+  const activeStrip = Math.floor(frame * 0.02) % 12;
   
   leds.forEach((led) => {
     const stripIndex = parseInt(led.stripId.split('-').pop() || '0');
@@ -109,9 +114,9 @@ function animate(leds, time) {
 ### 6. 3D Distance Effect
 
 ```javascript
-function animate(leds, time) {
+function animate(leds, frame, shape) {
   const center = { x: 0, y: 0, z: 0 };
-  const pulse = Math.sin(time * 0.002) * 25 + 25;
+  const pulse = Math.sin(frame * 0.03) * 25 + 25;
   
   leds.forEach((led) => {
     const dx = led.position.x - center.x;
@@ -159,9 +164,9 @@ function hslToRgb(h, s, l) {
   };
 }
 
-function animate(leds, time) {
+function animate(leds, frame, shape) {
   leds.forEach((led, index) => {
-    const hue = (index / leds.length + time * 0.0001) % 1.0;
+    const hue = (index / leds.length + frame * 0.005) % 1.0;
     const rgb = hslToRgb(hue, 1.0, 0.5);
     led.color.r = rgb.r;
     led.color.g = rgb.g;
@@ -174,19 +179,22 @@ function animate(leds, time) {
 
 1. **Avoid expensive calculations in loops**: Pre-calculate values outside the forEach when possible
 2. **Use Math functions efficiently**: Cache sin/cos values if used multiple times
-3. **Consider frame rate**: Animations run at ~60 FPS, so optimize accordingly
+3. **Consider frame rate**: Animations run at ~60 FPS, frame numbers increment each tick
 4. **Use randomness carefully**: `Math.random()` for every LED every frame can be slow
+5. **Frame number calculations**: Since `frame` increments faster than milliseconds, adjust your multipliers accordingly (e.g., `frame * 0.01` instead of `time * 0.0005`)
 
 ## Debugging
 
 Use console.log to debug your animations:
 
 ```javascript
-function animate(leds, time) {
-  // Log once per second
-  if (Math.floor(time / 1000) % 1 === 0 && time % 1000 < 16) {
+function animate(leds, frame, shape) {
+  // Log every 60 frames (~once per second at 60fps)
+  if (frame % 60 === 0) {
+    console.log('Frame:', frame);
     console.log('LED count:', leds.length);
     console.log('First LED:', leds[0]);
+    console.log('Shape:', shape.name);
   }
   
   // Your animation code
@@ -195,11 +203,11 @@ function animate(leds, time) {
 
 ## Common Patterns
 
-### Time-based Speed Control
+### Frame-based Speed Control
 
 ```javascript
-const speed = 0.003; // Adjust this value
-const value = Math.sin(time * speed);
+const speed = 0.05; // Adjust this value
+const value = Math.sin(frame * speed);
 ```
 
 ### Normalized Values

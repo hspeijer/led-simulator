@@ -2,6 +2,10 @@
 
 A Next.js application for simulating and visualizing LED animation patterns in 3D using Three.js.
 
+## 🎮 Live Demo
+
+Try it now: **[https://led-simulator-gray.vercel.app/](https://led-simulator-gray.vercel.app/)**
+
 ## Features
 
 - **3D Visualization**: Real-time LED animation rendering using Three.js and React Three Fiber
@@ -10,8 +14,12 @@ A Next.js application for simulating and visualizing LED animation patterns in 3
   - **Animation Editor** (bottom): Write animation patterns in JavaScript
 - **DSL for LED Shapes**: Domain-specific language for defining LED strip layouts as graphs with directional vectors
 - **Pre-built Shapes**: 7 sample shapes (Cube, Line, Square, Pyramid, Helix, Star, Sphere)
-- **Pre-built Patterns**: 5 sample animations (Rainbow Wave, Pulse, Running Lights, Fire Effect, Sparkle)
+- **Pre-built Patterns**: 7 sample animations including graph-based navigation
 - **Linked System**: Animation patterns automatically work with the currently selected shape
+- **Graph Navigation**: Shapes are automatically converted to directed graphs
+  - Walkers navigate from node to node
+  - Random edge selection at junctions
+  - Perfect for path-based animations
 - **Persistence**: Save/load custom shapes and animations using localStorage
   - 💾 Save button to store your creations
   - 🗑️ Delete button for custom items
@@ -40,6 +48,7 @@ See the documentation for detailed guides:
 - [PERSISTENCE.md](PERSISTENCE.md) - Save/load features and shape parameter
 - [SHAPE_DSL.md](SHAPE_DSL.md) - Shape definition language reference
 - [ANIMATION_GUIDE.md](ANIMATION_GUIDE.md) - Animation examples and patterns
+- [GRAPH_NAVIGATION.md](GRAPH_NAVIGATION.md) - Graph-based navigation system (NEW!)
 
 ## How It Works
 
@@ -54,6 +63,7 @@ The application has a **dual-editor system**:
    - Select from preset animations or write custom ones
    - Animations automatically apply to the current shape
    - Access to all LEDs with positions and colors
+   - Use graph navigation for path-based animations
 
 3. **3D Visualization** (right): See the result in real-time
    - Rotate, zoom, and pan with mouse
@@ -92,6 +102,29 @@ function animate(leds, time, shape) {
   });
 }
 ```
+
+### Graph Navigation (Advanced)
+
+Use the graph navigation system for path-based animations:
+
+```javascript
+const { buildGraphFromShape } = graphUtils;
+const { GraphWalker } = walkerUtils;
+
+// Create a walker
+if (!window.walker) {
+  const graph = buildGraphFromShape(shape);
+  window.walker = new GraphWalker(graph, undefined, 1.0);
+}
+
+function animate(leds, time, shape) {
+  walker.update();  // Move to next position
+  const ledIndex = walker.getCurrentLEDIndex();
+  // Animate based on walker position
+}
+```
+
+See [GRAPH_NAVIGATION.md](GRAPH_NAVIGATION.md) for complete documentation.
 
 ### Creating Custom Shapes
 

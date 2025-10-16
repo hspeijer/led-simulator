@@ -134,3 +134,26 @@
   z-index: 100;
 }
 
+.playButton {
+  background: #0e639c;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.playButton:hover {
+  background: #1177bb;
+}
+
+.playButton:active {
+  background: #0d5a8f;
+}
+

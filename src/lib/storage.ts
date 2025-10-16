@@ -69,10 +69,10 @@ export function deleteCustomShape(name: string): void {
   localStorage.setItem(STORAGE_KEYS.CUSTOM_SHAPES, JSON.stringify(shapes));
 }
 
-// Last used state
-export function saveLastAnimation(code: string): void {
+// Last used state - only for tracking selections, not caching preset code
+export function saveLastAnimation(name: string): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.LAST_ANIMATION, code);
+  localStorage.setItem(STORAGE_KEYS.LAST_ANIMATION, name);
 }
 
 export function getLastAnimation(): string | null {
@@ -80,14 +80,32 @@ export function getLastAnimation(): string | null {
   return localStorage.getItem(STORAGE_KEYS.LAST_ANIMATION);
 }
 
-export function saveLastShape(code: string): void {
+export function saveLastShape(name: string): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.LAST_SHAPE, code);
+  localStorage.setItem(STORAGE_KEYS.LAST_SHAPE, name);
 }
 
 export function getLastShape(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(STORAGE_KEYS.LAST_SHAPE);
+}
+
+// Migration: Clear old cached code if it exists (for users upgrading)
+export function clearOldCachedCode(): void {
+  if (typeof window === 'undefined') return;
+  
+  // Check if the stored values look like code (contain "function" keyword)
+  // If so, clear them - they're from the old format
+  const lastAnim = localStorage.getItem(STORAGE_KEYS.LAST_ANIMATION);
+  const lastShape = localStorage.getItem(STORAGE_KEYS.LAST_SHAPE);
+  
+  if (lastAnim && lastAnim.includes('function')) {
+    localStorage.removeItem(STORAGE_KEYS.LAST_ANIMATION);
+  }
+  
+  if (lastShape && lastShape.includes('function')) {
+    localStorage.removeItem(STORAGE_KEYS.LAST_SHAPE);
+  }
 }
 
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { createCube, generateLEDs, createStrip, buildShape } from '@/lib/shapeBuilder';
+import { generateLEDs, createNode, createEdge, buildShape } from '@/lib/shapeBuilder';
 import { defaultAnimations } from '@/lib/animations';
 import { defaultShapes } from '@/lib/shapes';
 import { LED, AnimationFunction, LEDShape } from '@/types/led';
@@ -16,7 +16,8 @@ import {
   saveLastAnimation,
   saveLastShape,
   deleteCustomAnimation,
-  deleteCustomShape
+  deleteCustomShape,
+  clearOldCachedCode
 } from '@/lib/storage';
 import styles from './page.module.css';
 
@@ -52,9 +53,17 @@ export default function Home() {
   // Error state
   const [shapeError, setShapeError] = useState<string | null>(null);
   const [animationError, setAnimationError] = useState<string | null>(null);
+  
+  // Animation playback state
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [stepFrame, setStepFrame] = useState<number>(0);
+  const [fps, setFps] = useState<number>(60);
 
   // Load saved patterns on mount
   useEffect(() => {
+    // Clear old cached code from previous version
+    clearOldCachedCode();
+    
     const savedShapes = getCustomShapes();
     const savedAnimations = getCustomAnimations();
     
@@ -66,15 +75,26 @@ export default function Home() {
     
     setCustomShapes(shapesMap);
     setCustomAnimations(animMap);
-    setAllShapes({ ...defaultShapes, ...shapesMap });
-    setAllAnimations({ ...defaultAnimations, ...animMap });
     
-    // Load last used code
-    const lastShape = getLastShape();
-    const lastAnim = getLastAnimation();
+    const allShapesMap: Record<string, string> = { ...defaultShapes, ...shapesMap };
+    const allAnimationsMap: Record<string, string> = { ...defaultAnimations, ...animMap };
     
-    if (lastShape) setShapeCode(lastShape);
-    if (lastAnim) setAnimationCode(lastAnim);
+    setAllShapes(allShapesMap);
+    setAllAnimations(allAnimationsMap);
+    
+    // Load last selected items (always load fresh code from presets or custom)
+    const lastShapeName = getLastShape();
+    const lastAnimName = getLastAnimation();
+    
+    if (lastShapeName && allShapesMap[lastShapeName]) {
+      setSelectedShape(lastShapeName);
+      setShapeCode(allShapesMap[lastShapeName]);
+    }
+    
+    if (lastAnimName && allAnimationsMap[lastAnimName]) {
+      setSelectedPattern(lastAnimName);
+      setAnimationCode(allAnimationsMap[lastAnimName]);
+    }
   }, []);
 
   // Compile the shape code
@@ -86,11 +106,11 @@ export default function Home() {
       `;
       
       // Create function with shape builder utilities in scope
-      const shapeFn = new Function('createStrip', 'buildShape', 'createCube', wrappedCode);
-      const shape = shapeFn(createStrip, buildShape, createCube) as LEDShape;
+      const shapeFn = new Function('createNode', 'createEdge', 'buildShape', wrappedCode);
+      const shape = shapeFn(createNode, createEdge, buildShape) as LEDShape;
       
-      if (!shape || !shape.strips) {
-        throw new Error('Shape must return a valid LEDShape object');
+      if (!shape || !shape.nodes || !shape.edges) {
+        throw new Error('Shape must return a valid LEDShape object with nodes and edges');
       }
       
       const leds = generateLEDs(shape);
@@ -105,16 +125,40 @@ export default function Home() {
   }, []);
 
   // Compile the animation code
-  const compileAnimation = useCallback((code: string) => {
+  const compileAnimation = useCallback(async (code: string) => {
     try {
-      // Create a function that wraps the user code
+      // Create a function that wraps the user code with graph utilities injected
       const wrappedCode = `
         ${code}
         return animate;
       `;
       
-      const animationFn = new Function('leds', 'time', wrappedCode) as unknown as () => AnimationFunction;
-      const fn = animationFn();
+      // Dynamically import graph utilities (client-side only)
+      const graphBuilderModule = await import('@/lib/graphBuilder');
+      const { GraphWalker } = await import('@/lib/graphWalker');
+      
+      // Create function with graph utilities in scope
+      const animationFn = new Function(
+        'leds', 
+        'frame', 
+        'shape',
+        'graphUtils', 
+        'walkerUtils',
+        wrappedCode
+      ) as unknown as (
+        leds: any, 
+        frame: any, 
+        shape: any,
+        graphUtils: any,
+        walkerUtils: any
+      ) => AnimationFunction;
+      
+      const fn = (leds: LED[], frame: number, shape: LEDShape) => {
+        const animateFn = animationFn(leds, frame, shape, graphBuilderModule, { GraphWalker });
+        if (typeof animateFn === 'function') {
+          animateFn(leds, frame, shape);
+        }
+      };
       
       setCompiledAnimation(() => fn);
       setAnimationError(null);
@@ -129,7 +173,6 @@ export default function Home() {
   useEffect(() => {
     const timer = setTimeout(() => {
       compileShape(shapeCode);
-      saveLastShape(shapeCode);
     }, 500);
 
     return () => clearTimeout(timer);
@@ -139,7 +182,6 @@ export default function Home() {
   useEffect(() => {
     const timer = setTimeout(() => {
       compileAnimation(animationCode);
-      saveLastAnimation(animationCode);
     }, 500);
 
     return () => clearTimeout(timer);
@@ -150,6 +192,7 @@ export default function Home() {
     const shapeName = e.target.value;
     setSelectedShape(shapeName);
     setShapeCode(allShapes[shapeName] || '');
+    saveLastShape(shapeName); // Save selected name, not code
   };
 
   // Handle pattern selection
@@ -157,6 +200,7 @@ export default function Home() {
     const pattern = e.target.value;
     setSelectedPattern(pattern);
     setAnimationCode(allAnimations[pattern] || '');
+    saveLastAnimation(pattern); // Save selected name, not code
   };
 
   // Save handlers
@@ -220,10 +264,6 @@ export default function Home() {
   // Handle manual run
   const handleRunShape = () => {
     compileShape(shapeCode);
-  };
-
-  const handleRunAnimation = () => {
-    compileAnimation(animationCode);
   };
 
   // Combined error display
@@ -316,9 +356,36 @@ export default function Home() {
                   🗑️
                 </button>
               )}
-              <button className={styles.button} onClick={handleRunAnimation}>
-                Run
+              <button 
+                className={styles.playButton} 
+                onClick={() => setIsPlaying(!isPlaying)}
+                title={isPlaying ? 'Pause animation' : 'Play animation'}
+              >
+                {isPlaying ? '⏸️ Pause' : '▶️ Play'}
               </button>
+              <button 
+                className={styles.button} 
+                onClick={() => setStepFrame(prev => prev + 1)}
+                title="Step forward one frame"
+                disabled={isPlaying}
+              >
+                ⏭️ Step
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '16px' }}>
+                <label htmlFor="fps-slider" style={{ fontSize: '14px', whiteSpace: 'nowrap' }}>
+                  FPS: {fps}
+                </label>
+                <input
+                  id="fps-slider"
+                  type="range"
+                  min="1"
+                  max="100"
+                  value={fps}
+                  onChange={(e) => setFps(Number(e.target.value))}
+                  style={{ width: '100px' }}
+                  title={`Animation speed: ${fps} frames per second`}
+                />
+              </div>
             </div>
           </div>
           <div className={styles.animationEditorWrapper}>
@@ -339,10 +406,17 @@ export default function Home() {
         )}
         {compiledShape && (
           <div className={styles.info}>
-            Shape: {compiledShape.name} | LEDs: {compiledShape.totalLEDs} | Strips: {compiledShape.strips.length}
+            Shape: {compiledShape.name} | LEDs: {compiledShape.totalLEDs} | Nodes: {compiledShape.nodes.size} | Edges: {compiledShape.edges.size}
           </div>
         )}
-        <LEDVisualization leds={shapeLeds} shape={compiledShape} animationFn={compiledAnimation} />
+        <LEDVisualization 
+          leds={shapeLeds} 
+          shape={compiledShape} 
+          animationFn={compiledAnimation} 
+          isPlaying={isPlaying} 
+          stepFrame={stepFrame}
+          fps={fps}
+        />
       </div>
     </div>
   );

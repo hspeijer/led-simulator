@@ -1,12 +1,12 @@
 # Shape DSL Documentation
 
-The LED Simulator uses a Domain-Specific Language (DSL) to define LED strip shapes in 3D space.
+The LED Simulator uses a Domain-Specific Language (DSL) to define LED shapes in 3D space using a **graph-based node/edge system**.
 
 ## Core Concepts
 
 ### Vector3D
 
-A 3D coordinate or direction:
+A 3D coordinate:
 
 ```typescript
 interface Vector3D {
@@ -19,227 +19,279 @@ interface Vector3D {
 Example:
 ```javascript
 const point = { x: 10, y: 5, z: -3 };
-const direction = { x: 1, y: 0, z: 0 }; // Points along X axis
 ```
 
-### LEDStrip
+### ShapeNode
 
-Defines a linear strip of LEDs:
+A node represents a point in 3D space where edges connect:
 
 ```typescript
-interface LEDStrip {
-  id: string;           // Unique identifier
-  startPoint: Vector3D; // Starting position in 3D space
-  direction: Vector3D;  // Directional vector (auto-normalized)
-  ledCount: number;     // Number of LEDs in this strip
-  startIndex: number;   // Global LED index where this strip starts
+interface ShapeNode {
+  id: string;                  // Unique identifier
+  position: Vector3D;          // 3D position
+  incomingEdges: string[];     // Edge IDs that end at this node
+  outgoingEdges: string[];     // Edge IDs that start from this node
 }
 ```
 
+**Key Features:**
+- Each node tracks which edges connect to it
+- Nodes can answer which edges come in and which go out
+- Multiple edges can connect to the same node
+
+### ShapeEdge
+
+An edge connects two nodes and contains LEDs along its length:
+
+```typescript
+interface ShapeEdge {
+  id: string;           // Unique identifier
+  fromNodeId: string;   // ID of the starting node
+  toNodeId: string;     // ID of the ending node
+  ledCount: number;     // Number of LEDs along this edge
+  startIndex: number;   // Global LED index where this edge starts
+}
+```
+
+**Key Features:**
+- LEDs are evenly distributed between the two nodes
+- Each edge knows its start and end nodes
+- Edges can be traversed in both directions
+
 ### LEDShape
 
-A complete shape made of multiple strips:
+A complete shape made of nodes and edges:
 
 ```typescript
 interface LEDShape {
   name: string;
-  strips: LEDStrip[];
+  nodes: Map<string, ShapeNode>;
+  edges: Map<string, ShapeEdge>;
   totalLEDs: number;
 }
 ```
 
 ## API Functions
 
-### `createStrip(id, start, direction, ledCount, startIndex)`
+### `createNode(id, position)`
 
-Creates a single LED strip.
+Creates a node at a specific 3D position.
 
 ```javascript
-import { createStrip } from '@/lib/shapeBuilder';
+const node = createNode('corner-1', { x: 0, y: 0, z: 0 });
+```
 
-const strip = createStrip(
-  'my-strip',                    // ID
-  { x: 0, y: 0, z: 0 },         // Start point
-  { x: 1, y: 0, z: 0 },         // Direction (will be normalized)
-  50,                            // LED count
-  0                              // Start index
+**Parameters:**
+- `id` (string): Unique identifier for the node
+- `position` (Vector3D): 3D coordinates of the node
+
+### `createEdge(id, fromNodeId, toNodeId, ledCount, startIndex)`
+
+Creates an edge connecting two nodes with LEDs.
+
+```javascript
+const edge = createEdge(
+  'edge-1',           // Edge ID
+  'corner-1',         // From node ID
+  'corner-2',         // To node ID
+  50,                 // Number of LEDs
+  0                   // Start index
 );
 ```
 
-### `buildShape(name, strips)`
+**Parameters:**
+- `id` (string): Unique identifier for the edge
+- `fromNodeId` (string): ID of the starting node
+- `toNodeId` (string): ID of the ending node
+- `ledCount` (number): Number of LEDs along this edge
+- `startIndex` (number): Global LED index where this edge starts
 
-Combines multiple strips into a shape.
+### `buildShape(name, nodes, edges)`
+
+Combines nodes and edges into a complete shape.
 
 ```javascript
-import { buildShape, createStrip } from '@/lib/shapeBuilder';
-
-const strips = [
-  createStrip('strip-1', { x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 30, 0),
-  createStrip('strip-2', { x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, 30, 30),
-];
-
-const shape = buildShape('L-Shape', strips);
+const shape = buildShape('MyShape', nodes, edges);
 ```
+
+**Parameters:**
+- `name` (string): Name of the shape
+- `nodes` (ShapeNode[]): Array of nodes
+- `edges` (ShapeEdge[]): Array of edges
+
+**Returns:** LEDShape object with automatically connected nodes
+
+The `buildShape` function automatically:
+- Links nodes to their incoming and outgoing edges
+- Calculates the total number of LEDs
+- Creates Map structures for efficient lookup
 
 ### `generateLEDs(shape)`
 
 Converts a shape definition into actual LED objects with positions.
 
 ```javascript
-import { generateLEDs } from '@/lib/shapeBuilder';
-
 const leds = generateLEDs(shape);
 // Returns array of LED objects with calculated positions
 ```
 
-### `normalize(vector)`
-
-Normalizes a vector to unit length.
-
-```javascript
-import { normalize } from '@/lib/shapeBuilder';
-
-const normalized = normalize({ x: 3, y: 4, z: 0 });
-// Returns { x: 0.6, y: 0.8, z: 0 }
-```
+LEDs are distributed evenly along each edge between the two nodes.
 
 ## Example Shapes
 
-### Simple Line
+### Simple Line (2 nodes, 1 edge)
 
 ```javascript
-import { createStrip, buildShape } from '@/lib/shapeBuilder';
+const nodes = [
+  createNode('start', { x: -25, y: 0, z: 0 }),
+  createNode('end', { x: 25, y: 0, z: 0 }),
+];
 
-const line = buildShape('Line', [
-  createStrip('line-1', { x: -25, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, 50, 0)
-]);
+const edges = [
+  createEdge('line', 'start', 'end', 100, 0),
+];
+
+return buildShape('Line', nodes, edges);
 ```
 
-### Square
+### Triangle (3 nodes, 3 edges)
 
 ```javascript
-const square = buildShape('Square', [
-  createStrip('bottom', { x: -25, y: -25, z: 0 }, { x: 1, y: 0, z: 0 }, 50, 0),
-  createStrip('right', { x: 25, y: -25, z: 0 }, { x: 0, y: 1, z: 0 }, 50, 50),
-  createStrip('top', { x: 25, y: 25, z: 0 }, { x: -1, y: 0, z: 0 }, 50, 100),
-  createStrip('left', { x: -25, y: 25, z: 0 }, { x: 0, y: -1, z: 0 }, 50, 150),
-]);
-```
+const nodes = [
+  createNode('corner-1', { x: 0, y: 20, z: 0 }),
+  createNode('corner-2', { x: -20, y: -20, z: 0 }),
+  createNode('corner-3', { x: 20, y: -20, z: 0 }),
+];
 
-### Cube (12 edges)
-
-```javascript
-import { createCube } from '@/lib/shapeBuilder';
-
-const cube = createCube(50); // 50 LEDs per edge
-```
-
-The cube function creates:
-- 4 bottom face edges
-- 4 top face edges
-- 4 vertical edges
-
-### Pyramid
-
-```javascript
-const pyramid = buildShape('Pyramid', [
-  // Base edges (square)
-  createStrip('base-1', { x: -25, y: 0, z: 25 }, { x: 1, y: 0, z: 0 }, 50, 0),
-  createStrip('base-2', { x: 25, y: 0, z: 25 }, { x: 0, y: 0, z: -1 }, 50, 50),
-  createStrip('base-3', { x: 25, y: 0, z: -25 }, { x: -1, y: 0, z: 0 }, 50, 100),
-  createStrip('base-4', { x: -25, y: 0, z: -25 }, { x: 0, y: 0, z: 1 }, 50, 150),
-  
-  // Edges to apex
-  createStrip('edge-1', { x: -25, y: 0, z: 25 }, { x: 0.5, y: 1, z: -0.5 }, 50, 200),
-  createStrip('edge-2', { x: 25, y: 0, z: 25 }, { x: -0.5, y: 1, z: -0.5 }, 50, 250),
-  createStrip('edge-3', { x: 25, y: 0, z: -25 }, { x: -0.5, y: 1, z: 0.5 }, 50, 300),
-  createStrip('edge-4', { x: -25, y: 0, z: -25 }, { x: 0.5, y: 1, z: 0.5 }, 50, 350),
-]);
-```
-
-### Helix
-
-```javascript
-const helix = buildShape('Helix', 
-  Array.from({ length: 10 }, (_, i) => {
-    const angle = (i / 10) * Math.PI * 4; // 2 full rotations
-    const x = Math.cos(angle) * 20;
-    const z = Math.sin(angle) * 20;
-    const y = i * 5;
-    
-    const nextAngle = ((i + 1) / 10) * Math.PI * 4;
-    const dx = Math.cos(nextAngle) * 20 - x;
-    const dz = Math.sin(nextAngle) * 20 - z;
-    const dy = 5;
-    
-    return createStrip(
-      `helix-${i}`,
-      { x, y, z },
-      { x: dx, y: dy, z: dz },
-      10,
-      i * 10
-    );
-  })
-);
-```
-
-### Star
-
-```javascript
-const points = 5;
-const outerRadius = 30;
-const innerRadius = 15;
-const strips = [];
 let ledIndex = 0;
+const edges = [
+  createEdge('edge-1', 'corner-1', 'corner-2', 50, ledIndex),
+  ledIndex += 50,
+  createEdge('edge-2', 'corner-2', 'corner-3', 50, ledIndex),
+  ledIndex += 50,
+  createEdge('edge-3', 'corner-3', 'corner-1', 50, ledIndex),
+];
 
-for (let i = 0; i < points * 2; i++) {
-  const angle = (i / (points * 2)) * Math.PI * 2;
-  const radius = i % 2 === 0 ? outerRadius : innerRadius;
-  const x = Math.cos(angle) * radius;
-  const z = Math.sin(angle) * radius;
-  
-  const nextAngle = ((i + 1) / (points * 2)) * Math.PI * 2;
-  const nextRadius = (i + 1) % 2 === 0 ? outerRadius : innerRadius;
-  const nextX = Math.cos(nextAngle) * nextRadius;
-  const nextZ = Math.sin(nextAngle) * nextRadius;
-  
-  strips.push(createStrip(
-    `star-${i}`,
-    { x, y: 0, z },
-    { x: nextX - x, y: 0, z: nextZ - z },
-    20,
-    ledIndex
-  ));
-  ledIndex += 20;
-}
-
-const star = buildShape('Star', strips);
+return buildShape('Triangle', nodes, edges.filter(e => typeof e !== 'number'));
 ```
 
-## Shape Composition
+### Cube (8 nodes, 12 edges)
 
-You can combine shapes by merging their strips:
+The default cube shape demonstrates a complete graph structure:
 
 ```javascript
-const shape1 = createCube(30);
-const shape2 = createCube(15); // Smaller cube
+const ledsPerEdge = 50;
+const size = ledsPerEdge - 1;
+const half = size / 2;
 
-// Offset the second cube
-const offsetStrips = shape2.strips.map(strip => ({
-  ...strip,
-  startPoint: {
-    x: strip.startPoint.x + 50,
-    y: strip.startPoint.y,
-    z: strip.startPoint.z,
-  },
-  startIndex: strip.startIndex + shape1.totalLEDs,
-}));
+// Create 8 corner nodes
+const nodes = [
+  createNode('bottom-front-left', { x: -half, y: -half, z: half }),
+  createNode('bottom-front-right', { x: half, y: -half, z: half }),
+  createNode('bottom-back-right', { x: half, y: -half, z: -half }),
+  createNode('bottom-back-left', { x: -half, y: -half, z: -half }),
+  createNode('top-front-left', { x: -half, y: half, z: half }),
+  createNode('top-front-right', { x: half, y: half, z: half }),
+  createNode('top-back-right', { x: half, y: half, z: -half }),
+  createNode('top-back-left', { x: -half, y: half, z: -half }),
+];
 
-const combined = buildShape('TwoCubes', [
-  ...shape1.strips,
-  ...offsetStrips,
-]);
+// Create 12 edges (4 bottom, 4 top, 4 vertical)
+let ledIndex = 0;
+const edges = [
+  // Bottom face
+  createEdge('bottom-front', 'bottom-front-left', 'bottom-front-right', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  createEdge('bottom-right', 'bottom-front-right', 'bottom-back-right', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  createEdge('bottom-back', 'bottom-back-right', 'bottom-back-left', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  createEdge('bottom-left', 'bottom-back-left', 'bottom-front-left', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  
+  // Top face
+  createEdge('top-front', 'top-front-left', 'top-front-right', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  createEdge('top-right', 'top-front-right', 'top-back-right', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  createEdge('top-back', 'top-back-right', 'top-back-left', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  createEdge('top-left', 'top-back-left', 'top-front-left', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  
+  // Vertical edges
+  createEdge('vertical-front-left', 'bottom-front-left', 'top-front-left', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  createEdge('vertical-front-right', 'bottom-front-right', 'top-front-right', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  createEdge('vertical-back-right', 'bottom-back-right', 'top-back-right', ledsPerEdge, ledIndex),
+  ledIndex += ledsPerEdge,
+  createEdge('vertical-back-left', 'bottom-back-left', 'top-back-left', ledsPerEdge, ledIndex),
+];
+
+return buildShape('Cube', nodes, edges.filter(e => typeof e !== 'number'));
 ```
+
+### Pyramid (5 nodes, 8 edges)
+
+```javascript
+const base = 25;
+const nodes = [
+  // Base corners
+  createNode('base-1', { x: -base, y: -20, z: base }),
+  createNode('base-2', { x: base, y: -20, z: base }),
+  createNode('base-3', { x: base, y: -20, z: -base }),
+  createNode('base-4', { x: -base, y: -20, z: -base }),
+  // Apex
+  createNode('apex', { x: 0, y: 30, z: 0 }),
+];
+
+let ledIndex = 0;
+const edges = [
+  // Base square
+  createEdge('base-1-2', 'base-1', 'base-2', 40, ledIndex), ledIndex += 40,
+  createEdge('base-2-3', 'base-2', 'base-3', 40, ledIndex), ledIndex += 40,
+  createEdge('base-3-4', 'base-3', 'base-4', 40, ledIndex), ledIndex += 40,
+  createEdge('base-4-1', 'base-4', 'base-1', 40, ledIndex), ledIndex += 40,
+  // Edges to apex
+  createEdge('apex-1', 'base-1', 'apex', 40, ledIndex), ledIndex += 40,
+  createEdge('apex-2', 'base-2', 'apex', 40, ledIndex), ledIndex += 40,
+  createEdge('apex-3', 'base-3', 'apex', 40, ledIndex), ledIndex += 40,
+  createEdge('apex-4', 'base-4', 'apex', 40, ledIndex),
+];
+
+return buildShape('Pyramid', nodes, edges.filter(e => typeof e !== 'number'));
+```
+
+## Understanding Node Connections
+
+Each node automatically tracks its connections when you build a shape:
+
+```javascript
+const nodes = [
+  createNode('center', { x: 0, y: 0, z: 0 }),
+  createNode('north', { x: 0, y: 10, z: 0 }),
+  createNode('east', { x: 10, y: 0, z: 0 }),
+  createNode('south', { x: 0, y: -10, z: 0 }),
+];
+
+const edges = [
+  createEdge('e1', 'center', 'north', 20, 0),
+  createEdge('e2', 'center', 'east', 20, 20),
+  createEdge('e3', 'south', 'center', 20, 40),
+];
+
+const shape = buildShape('Star', nodes, edges.filter(e => typeof e !== 'number'));
+
+// After building, the 'center' node will have:
+// - outgoingEdges: ['e1', 'e2']  (edges starting from center)
+// - incomingEdges: ['e3']         (edges ending at center)
+```
+
+This graph structure allows animations to:
+- Navigate along edges
+- Find which paths lead out from a node
+- Traverse the shape intelligently
 
 ## Best Practices
 
@@ -248,29 +300,53 @@ const combined = buildShape('TwoCubes', [
    - Y: Down (-) to Up (+)
    - Z: Back (-) to Front (+)
 
-2. **Spacing**: LEDs are spaced 1 unit apart by default
+2. **LED Distribution**: LEDs are evenly distributed along each edge between the two nodes
 
-3. **Direction Vectors**: Will be automatically normalized, but should point in the general direction
+3. **LED Indices**: 
+   - Must be consecutive across all edges
+   - Use the pattern: `ledIndex += ledCount` after each edge
+   - Filter out the `ledIndex` numbers when building: `edges.filter(e => typeof e !== 'number')`
 
-4. **LED Indices**: Must be consecutive and unique across all strips in a shape
+4. **Node IDs**: Should be unique and descriptive (e.g., 'corner-1', 'apex', 'center')
 
-5. **Strip IDs**: Should be unique within a shape for easier debugging
+5. **Edge IDs**: Should be unique within a shape for easier debugging
 
 6. **Scale**: Keep shapes within -50 to +50 units for best visibility
+
+7. **Graph Structure**:
+   - Each edge connects exactly two nodes
+   - Nodes can have multiple incoming and outgoing edges
+   - The graph can be disconnected (multiple separate components)
+
+## Advanced: Working with the Graph
+
+The node/edge structure enables powerful graph-based animations:
+
+```javascript
+// Access node connections
+shape.nodes.get('corner-1').outgoingEdges  // Array of edge IDs
+shape.nodes.get('corner-1').incomingEdges  // Array of edge IDs
+
+// Access edge information
+shape.edges.get('edge-1').fromNodeId  // Starting node ID
+shape.edges.get('edge-1').toNodeId    // Ending node ID
+shape.edges.get('edge-1').ledCount    // Number of LEDs on this edge
+```
 
 ## Troubleshooting
 
 ### LEDs not appearing
-- Check that LED count > 0
-- Verify positions are within camera view (-50 to +50)
-- Ensure direction vector is not {0, 0, 0}
+- Check that `ledCount > 0` for all edges
+- Verify node positions are within camera view (-50 to +50)
+- Ensure `fromNodeId` and `toNodeId` reference existing nodes
 
-### Gaps in strips
-- Verify consecutive startIndex values
-- Check that ledCount matches intended strip length
+### Gaps in shape
+- Verify consecutive `startIndex` values across edges
+- Check that you're filtering out numbers from the edges array
+- Ensure all edges are included in the final array
 
-### Unexpected positions
-- Remember directions are normalized
-- Check coordinate system orientation
-- Verify start points are correct
+### Edges not connecting properly
+- Verify node IDs match exactly (case-sensitive)
+- Ensure nodes are created before being referenced in edges
+- Check that `buildShape` receives both nodes and filtered edges arrays
 
