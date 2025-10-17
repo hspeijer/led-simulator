@@ -45,7 +45,7 @@ export interface LED {
   localIndex: number; // Index within the strip
 }
 
-export type AnimationFunction = (leds: LED[], frame: number, shape: LEDShape) => void;
+export type AnimationFunction = (leds: LED[], frame: number, shape: LEDShape, state?: any) => any;
 
 export interface AnimationPattern {
   name: string;

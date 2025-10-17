@@ -153,11 +153,12 @@ export default function Home() {
         walkerUtils: any
       ) => AnimationFunction;
       
-      const fn = (leds: LED[], frame: number, shape: LEDShape) => {
+      const fn = (leds: LED[], frame: number, shape: LEDShape, state?: any) => {
         const animateFn = animationFn(leds, frame, shape, graphBuilderModule, { GraphWalker });
         if (typeof animateFn === 'function') {
-          animateFn(leds, frame, shape);
+          return animateFn(leds, frame, shape, state);
         }
+        return state;
       };
       
       setCompiledAnimation(() => fn);

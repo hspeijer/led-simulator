@@ -9,7 +9,7 @@ import { LED, LEDShape } from '@/types/led';
 interface LEDPointsProps {
   leds: LED[];
   shape: LEDShape | null;
-  animationFn: ((leds: LED[], frame: number, shape: LEDShape) => void) | null;
+  animationFn: ((leds: LED[], frame: number, shape: LEDShape, state?: any) => any) | null;
   isPlaying: boolean;
   stepFrame: number;
   fps: number;
@@ -25,6 +25,9 @@ function LEDPoints({ leds, shape, animationFn, isPlaying, stepFrame, fps, onFpsU
   const lastStepFrame = useRef(stepFrame);
   const lastFrameTime = useRef(0);
   
+  // Animation state management - passed between animate calls
+  const animationState = useRef<any>(undefined);
+  
   // FPS counter
   const fpsFrameTimes = useRef<number[]>([]);
 
@@ -34,10 +37,19 @@ function LEDPoints({ leds, shape, animationFn, isPlaying, stepFrame, fps, onFpsU
     shapeRef.current = shape;
   }, [leds, shape]);
 
+  // Reset animation state when animation function changes
+  useEffect(() => {
+    animationState.current = undefined;
+    frameNumber.current = 0;
+  }, [animationFn]);
+
   // Track play/pause state changes and dump shape when animation starts
   useEffect(() => {
     // Detect when animation starts (transition from paused to playing)
     if (isPlaying && !lastPlayingState.current && shape) {
+      // Reset animation state when starting
+      animationState.current = undefined;
+      
       // Store shape on window for console inspection
       (window as any).shape = shape;
       
@@ -84,14 +96,17 @@ function LEDPoints({ leds, shape, animationFn, isPlaying, stepFrame, fps, onFpsU
       const colorAttribute = pointsRef.current.geometry.getAttribute('color') as THREE.BufferAttribute;
 
       try {
-        // Run animation function with frame number
-        animationFn(ledsRef.current, frameNumber.current, shapeRef.current);
+        // Run animation function with frame number and state, get new state back
+        const newState = animationFn(ledsRef.current, frameNumber.current, shapeRef.current, animationState.current);
+        animationState.current = newState;
         
         // Update all colors in the buffer
         ledsRef.current.forEach((led, i) => {
-          const r = led.color.r / 255;
-          const g = led.color.g / 255;
-          const b = led.color.b / 255;
+          // If LED is black, render as dim gray (10, 10, 10) for visibility
+          const isBlack = led.color.r === 0 && led.color.g === 0 && led.color.b === 0;
+          const r = isBlack ? 10 / 255 : led.color.r / 255;
+          const g = isBlack ? 10 / 255 : led.color.g / 255;
+          const b = isBlack ? 10 / 255 : led.color.b / 255;
           colorAttribute.setXYZ(i, r, g, b);
         });
         
@@ -117,10 +132,10 @@ function LEDPoints({ leds, shape, animationFn, isPlaying, stepFrame, fps, onFpsU
       positions[i * 3 + 1] = led.position.y;
       positions[i * 3 + 2] = led.position.z;
 
-      // Initialize with white color
-      colors[i * 3] = 1;
-      colors[i * 3 + 1] = 1;
-      colors[i * 3 + 2] = 1;
+      // Initialize with dim gray (10, 10, 10) for visibility when off
+      colors[i * 3] = 10 / 255;
+      colors[i * 3 + 1] = 10 / 255;
+      colors[i * 3 + 2] = 10 / 255;
     });
 
     const geometry = new THREE.BufferGeometry();
@@ -174,14 +189,17 @@ function LEDPoints({ leds, shape, animationFn, isPlaying, stepFrame, fps, onFpsU
     frameNumber.current++;
 
     try {
-      // Run animation function with frame number
-      animationFn(ledsRef.current, frameNumber.current, shapeRef.current);
+      // Run animation function with frame number and state, get new state back
+      const newState = animationFn(ledsRef.current, frameNumber.current, shapeRef.current, animationState.current);
+      animationState.current = newState;
       
       // Update colors in the buffer
       ledsRef.current.forEach((led, i) => {
-        const r = led.color.r / 255;
-        const g = led.color.g / 255;
-        const b = led.color.b / 255;
+        // If LED is black, render as dim gray (10, 10, 10) for visibility
+        const isBlack = led.color.r === 0 && led.color.g === 0 && led.color.b === 0;
+        const r = isBlack ? 10 / 255 : led.color.r / 255;
+        const g = isBlack ? 10 / 255 : led.color.g / 255;
+        const b = isBlack ? 10 / 255 : led.color.b / 255;
         colorAttribute.setXYZ(i, r, g, b);
       });
       
@@ -224,7 +242,7 @@ function WireframeCube({ size }: { size: number }) {
 interface LEDVisualizationProps {
   leds: LED[];
   shape: LEDShape | null;
-  animationFn: ((leds: LED[], frame: number, shape: LEDShape) => void) | null;
+  animationFn: ((leds: LED[], frame: number, shape: LEDShape, state?: any) => any) | null;
   isPlaying: boolean;
   stepFrame: number;
   fps: number;

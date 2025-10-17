@@ -57,85 +57,77 @@ const edges = [
 return buildShape('Cube', nodes, edges.filter(e => typeof e !== 'number'));`;
 
 export const hexagonalCylinderShape = `// Hexagonal Cylinder with 35 LEDs per edge
+// Points: A,B,C,D,E,F (bottom), G,H,I,J,K,L (top)
+// Path: A->G->H->B->I->C->J->D->K->E->L->F->E->D->C->B->A->F
 const ledsPerEdge = 35;
 const radius = 35;
 const height = 35;
 
-// Calculate hexagon vertices (6 corners)
+// Calculate hexagon vertices (6 corners) - clockwise when viewed from top
 const vertices = [];
 for (let i = 0; i < 6; i++) {
-  const angle = (i / 6) * Math.PI * 2;
+  const angle = -(i / 6) * Math.PI * 2; // Negative for clockwise
   const x = Math.cos(angle) * radius;
   const z = Math.sin(angle) * radius;
   vertices.push({ x, z });
 }
 
 // Create 12 nodes (6 bottom + 6 top)
+// Bottom: A=0, B=1, C=2, D=3, E=4, F=5
+// Top: G=0, H=1, I=2, J=3, K=4, L=5
 const nodes = [];
 
-// Bottom hexagon nodes
+// Bottom hexagon nodes (A, B, C, D, E, F)
 for (let i = 0; i < 6; i++) {
-  nodes.push(createNode(\`bottom-\${i}\`, {
+  const labels = ['A', 'B', 'C', 'D', 'E', 'F'];
+  nodes.push(createNode(\`bottom-\${i}-\${labels[i]}\`, {
     x: vertices[i].x,
     y: -height / 2,
     z: vertices[i].z
   }));
 }
 
-// Top hexagon nodes
+// Top hexagon nodes (G, H, I, J, K, L)
 for (let i = 0; i < 6; i++) {
-  nodes.push(createNode(\`top-\${i}\`, {
+  const labels = ['G', 'H', 'I', 'J', 'K', 'L'];
+  nodes.push(createNode(\`top-\${i}-\${labels[i]}\`, {
     x: vertices[i].x,
     y: height / 2,
     z: vertices[i].z
   }));
 }
 
-// Create 18 edges (6 bottom + 6 top + 6 vertical)
-// Each edge tracks its startIndex in the global LED array
+// Create edges following the specific path
+// Path: A->G->H->B->I->C->J->D->K->E->L->F->E->D->C->B->A->F
 let ledIndex = 0;
 const edges = [];
 
-// Bottom hexagon edges (LEDs 0-209)
-for (let i = 0; i < 6; i++) {
-  const nextI = (i + 1) % 6;
-  edges.push(createEdge(
-    \`bottom-edge-\${i}\`,
-    \`bottom-\${i}\`,
-    \`bottom-\${nextI}\`,
-    ledsPerEdge,
-    ledIndex
-  ));
-  ledIndex += ledsPerEdge;
-}
+// Helper to create edge with bottom/top prefix
+const b = (i) => \`bottom-\${i}-\${['A','B','C','D','E','F'][i]}\`;
+const t = (i) => \`top-\${i}-\${['G','H','I','J','K','L'][i]}\`;
 
-// Top hexagon edges (LEDs 210-419)
-for (let i = 0; i < 6; i++) {
-  const nextI = (i + 1) % 6;
-  edges.push(createEdge(
-    \`top-edge-\${i}\`,
-    \`top-\${i}\`,
-    \`top-\${nextI}\`,
-    ledsPerEdge,
-    ledIndex
-  ));
-  ledIndex += ledsPerEdge;
-}
+// Path sequence:
+edges.push(createEdge('A-G', b(0), t(0), 47, ledIndex)); ledIndex += 47; // A->G
+edges.push(createEdge('G-H', t(0), t(1), 48, ledIndex)); ledIndex += 48; // G->H
+edges.push(createEdge('H-B', t(1), b(1), 48, ledIndex)); ledIndex += 48; // H->B
+edges.push(createEdge('B-I', t(1), t(2), 48, ledIndex)); ledIndex += 48; // B->I
+edges.push(createEdge('I-C', t(2), b(2), 49, ledIndex)); ledIndex += 49; // I->C
+edges.push(createEdge('C-J', t(2), t(3), 50, ledIndex)); ledIndex += 50; // C->J
+edges.push(createEdge('J-D', t(3), b(3), 49, ledIndex)); ledIndex += 49; // J->D
+edges.push(createEdge('D-K', t(3), t(4), 48, ledIndex)); ledIndex += 48; // D->K
+edges.push(createEdge('K-E', t(4), b(4), 49, ledIndex)); ledIndex += 49; // K->E
+edges.push(createEdge('E-L', t(4), t(5), 48, ledIndex)); ledIndex += 48; // E->L
+edges.push(createEdge('L-G', t(5), t(0), 49, ledIndex)); ledIndex += 49; // F->E
+edges.push(createEdge('L-F', t(5), b(5), 48, ledIndex)); ledIndex += 48; // L->F
+edges.push(createEdge('F-E', b(5), b(0), 49, ledIndex)); ledIndex += 49; // F->E
+edges.push(createEdge('E-D', b(0), b(1), 48, ledIndex)); ledIndex += 48; // E->D
+edges.push(createEdge('D-C', b(1), b(2), 49, ledIndex)); ledIndex += 49; // D->C
+edges.push(createEdge('C-B', b(2), b(3), 49, ledIndex)); ledIndex += 49; // C->B
+edges.push(createEdge('B-A', b(3), b(4), 47, ledIndex)); ledIndex += 47; // B->A
+edges.push(createEdge('A-F', b(4), b(5), 48, ledIndex)); ledIndex += 48; // A->F
 
-// Vertical edges (LEDs 420-629)
-for (let i = 0; i < 6; i++) {
-  edges.push(createEdge(
-    \`vertical-edge-\${i}\`,
-    \`bottom-\${i}\`,
-    \`top-\${i}\`,
-    ledsPerEdge,
-    ledIndex
-  ));
-  ledIndex += ledsPerEdge;
-}
-
-// Total: 630 LEDs (18 edges × 35 LEDs per edge)
-return buildShape('Hexagonal Cylinder', nodes, edges);`;
+return buildShape('Hexagonal Cylinder', nodes, edges);
+`;
 
 export const ballShape = `// Ball (Sphere) with 20 LEDs per edge
 const ledsPerEdge = 20;
