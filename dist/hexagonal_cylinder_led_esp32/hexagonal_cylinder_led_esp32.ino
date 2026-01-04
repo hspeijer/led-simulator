@@ -1,36 +1,36 @@
 /**
  * Hexagonal Cylinder LED Controller for ESP32
- * Uses FastLED library to control 888 LEDs arranged in a hexagonal cylinder
+ * Uses FastLED library to control 886 LEDs arranged in a hexagonal cylinder
  * 
  * Hardware:
  * - ESP32 Development Board
- * - 888 WS2815 LEDs (or similar FastLED compatible)
+ * - 886 WS2815 LEDs (or similar FastLED compatible) - first LED died
  * - Data pin: GPIO 33
  * - Potentiometer on GPIO 32 (ADC1_CH4)
  * 
  * Potentiometer Control:
  * - Wiring: 3.3V → pot → GND, wiper → GPIO 32
  * - Turn pot to select from 19 animation patterns
- * - After 1 minute of no movement, enters RANDOM mode
+ * - After 3 minutes of no movement, enters RANDOM mode
  * - RANDOM mode automatically changes patterns every minute
  * - Moving pot exits RANDOM mode and returns to MANUAL control
  * 
  * Configuration (adjust at top of file):
  * - POT_CHANGE_PERCENT: Sensitivity (3=very sensitive, 10=normal)
- * - IDLE_TIMEOUT: Time before entering RANDOM mode (default 60s)
+ * - IDLE_TIMEOUT: Time before entering RANDOM mode (default 180s)
  * - RANDOM_INTERVAL: Pattern change interval in RANDOM mode (default 60s)
  * - USE_AUTO_CALIBRATION: Auto-detect pot range at startup (default false)
  * 
  * Shape: Hexagonal Cylinder
- * - 18 edges with varying LED counts = 888 LEDs total (VERIFIED)
- * - Edge lengths: 48,49,49,49,49,50,49,48,49,48,49,49,48,49,49,49,49,57
+ * - 18 edges with varying LED counts = 886 LEDs total (First LED died)
+ * - Edge lengths: 47,49,49,49,49,49,49,48,49,48,49,49,48,49,49,49,49,57
  * - Path: A->G->H->B->I->C->J->D->K->E->L->G->L->F->E->D->C->B->A->F
  */
 
 #include <FastLED.h>
 
 // LED Configuration
-#define NUM_LEDS 888  // 18 edges with VERIFIED LED counts (48+49+49+49+49+50+49+48+49+48+49+49+48+49+49+49+49+57)
+#define NUM_LEDS 886  // 18 edges with VERIFIED LED counts (47+49+49+49+49+49+49+48+49+48+49+49+48+49+49+49+49+57) - First LED died
 #define DATA_PIN 33  // ESP32 GPIO 33
 #define LED_TYPE WS2815
 #define COLOR_ORDER RGB  // Changed from GRB - adjust if colors are wrong
@@ -42,7 +42,8 @@
 // ============================================================================
 #define POT_PIN 32    // Potentiometer on GPIO 32 (ADC1_CH4)
 #define POT_CHANGE_PERCENT 3  // Sensitivity: 3=very sensitive, 10=normal, 20=less sensitive
-#define IDLE_TIMEOUT 60000  // Milliseconds before random mode (60000 = 1 minute)
+#define MIN_PATTERN_CHANGE_INTERVAL 1000  // Minimum 1 second between pattern changes
+#define IDLE_TIMEOUT 180000  // Milliseconds before random mode (180000 = 3 minutes)
 #define RANDOM_INTERVAL 60000  // Milliseconds between random pattern changes (60000 = 1 minute)
 #define USE_AUTO_CALIBRATION false  // true=auto-detect range at startup, false=use fixed 0-4095
 
@@ -60,6 +61,7 @@ uint8_t currentPattern = 0;
 int lastPotValue = 0;
 int lastStablePotValue = 0;
 unsigned long lastPotChangeTime = 0;
+unsigned long lastPatternChangeTime = 0;  // Track last pattern change for minimum interval
 bool randomMode = false;
 unsigned long lastRandomChangeTime = 0;
 
@@ -89,6 +91,18 @@ unsigned long mbStartTime = 0;
 // Cylinder Trace
 float ctProgress = 0.0f;
 bool ctInitialized = false;
+
+// Edge Walker
+bool ewInitialized = false;
+
+// Multi Walker
+bool mwInitialized = false;
+
+// Color Flood
+bool cfInitialized = false;
+
+// Rainbow Flood
+bool rfInitialized = false;
 
 // Star Sprinkle
 struct Star {
@@ -121,7 +135,7 @@ struct Wave {
 };
 #define MAX_WAVES 3
 Wave waves[MAX_WAVES];
-uint16_t swFrameCounter = 120; // Start at SPAWN_INTERVAL for immediate wave
+uint16_t swFrameCounter = 0; // Start at 0 for immediate wave
 
 // Winter Freeze
 float wfFreezeLevel = 0.0f;
@@ -140,7 +154,7 @@ struct Firework {
 };
 #define MAX_FIREWORKS 3
 Firework fireworks[MAX_FIREWORKS];
-uint16_t fwFrameCounter = 20; // Start at SPAWN_INTERVAL for immediate firework
+uint16_t fwFrameCounter = 90; // Start at SPAWN_INTERVAL for immediate firework
 
 // Random Sparkle
 uint16_t rsFrameCounter = 120; // Start at HOLD_DURATION for immediate sparkles
@@ -200,6 +214,7 @@ void setup() {
   lastPotValue = analogRead(POT_PIN);
   lastStablePotValue = lastPotValue;
   lastPotChangeTime = millis();
+  lastPatternChangeTime = millis();
   breatheStartTime = millis(); // Initialize breathing timer
   hbStartTime = millis(); // Initialize heartbeat timer
   efLastFlashTime = millis(); // Initialize edge flash timer
@@ -211,6 +226,9 @@ void setup() {
   Serial.print(POT_CHANGE_PERCENT);
   Serial.print(F("% | Threshold: "));
   Serial.println(potThreshold);
+  Serial.print(F("Min pattern change interval: "));
+  Serial.print(MIN_PATTERN_CHANGE_INTERVAL);
+  Serial.println(F("ms"));
   Serial.println(F("Setup complete!"));
   Serial.println(F("\nAvailable patterns:"));
   Serial.println(F("  0: Rainbow Wave"));
@@ -253,14 +271,17 @@ void loop() {
     lastStablePotValue = potValue;
     lastPotChangeTime = currentTime;
     
-    // Map pot value to pattern number using calibrated range
-    int constrainedValue = constrain(potValue, potMinValue, potMaxValue);
-    newPattern = map(constrainedValue, potMinValue, potMaxValue, 0, NUM_PATTERNS - 1);
-    
-    // Exit random mode
-    if (randomMode) {
-      randomMode = false;
-      Serial.println(F("Exiting RANDOM mode"));
+    // Only change pattern if minimum interval has passed
+    if (currentTime - lastPatternChangeTime >= MIN_PATTERN_CHANGE_INTERVAL) {
+      // Map pot value to pattern number
+      int constrainedValue = constrain(potValue, potMinValue, potMaxValue);
+      newPattern = map(constrainedValue, potMinValue, potMaxValue, 0, NUM_PATTERNS - 1);
+      
+      // Exit random mode
+      if (randomMode) {
+        randomMode = false;
+        Serial.println(F("Exiting RANDOM mode"));
+      }
     }
   }
   
@@ -280,6 +301,7 @@ void loop() {
   // Pattern change handling
   if (newPattern != currentPattern) {
     currentPattern = newPattern;
+    lastPatternChangeTime = currentTime;  // Track pattern change time
     
     Serial.print(randomMode ? F("RANDOM → ") : F("MANUAL → "));
     Serial.print(F("Pattern "));
@@ -323,13 +345,18 @@ void loop() {
     breatheStartTime = millis();
     mbStartTime = millis();
     ctProgress = 0.0f;
+    ctInitialized = false;
+    ewInitialized = false;
+    mwInitialized = false;
+    cfInitialized = false;
+    rfInitialized = false;
     starCount = 0;
     flamesInitialized = false;
-    swFrameCounter = 120; // Start at SPAWN_INTERVAL for immediate wave
+    swFrameCounter = 0; // Start at 0 for immediate wave
     for (uint8_t i = 0; i < MAX_WAVES; i++) waves[i].active = false;
     wfFreezeLevel = 0.0f;
     wfSparkleCount = 0;
-    fwFrameCounter = 20; // Start at SPAWN_INTERVAL for immediate firework
+    fwFrameCounter = 90; // Start at SPAWN_INTERVAL for immediate firework
     for (uint8_t i = 0; i < MAX_FIREWORKS; i++) fireworks[i].active = false;
     rsFrameCounter = 120; // Start at HOLD_DURATION for immediate sparkles
     rsActiveCount = 0;
@@ -481,24 +508,24 @@ void edgeFlash() {
   };
   
   const EdgeData edges[18] = {
-    {0, 48},       // Edge 0: A->G
-    {48, 49},      // Edge 1: G->H
-    {97, 49},      // Edge 2: H->B
-    {146, 49},     // Edge 3: B->I
-    {195, 49},     // Edge 4: I->C
-    {244, 50},     // Edge 5: C->J
-    {294, 49},     // Edge 6: J->D
-    {343, 48},     // Edge 7: D->K
-    {391, 49},     // Edge 8: K->E
-    {440, 48},     // Edge 9: E->L
-    {488, 49},     // Edge 10: L->G
-    {537, 49},     // Edge 11: L->F
-    {586, 48},     // Edge 12: F->E
-    {634, 49},     // Edge 13: E->D
-    {683, 49},     // Edge 14: D->C
-    {732, 49},     // Edge 15: C->B
-    {781, 49},     // Edge 16: B->A
-    {830, 57}      // Edge 17: A->F
+    {0, 47},       // Edge 0: A->G (first LED died)
+    {47, 49},      // Edge 1: G->H
+    {96, 49},      // Edge 2: H->B
+    {145, 49},     // Edge 3: B->I
+    {194, 49},     // Edge 4: I->C
+    {243, 49},     // Edge 5: C->J
+    {292, 49},     // Edge 6: J->D
+    {341, 48},     // Edge 7: D->K
+    {389, 49},     // Edge 8: K->E
+    {438, 48},     // Edge 9: E->L
+    {486, 49},     // Edge 10: L->G
+    {535, 49},     // Edge 11: L->F
+    {584, 48},     // Edge 12: F->E
+    {632, 49},     // Edge 13: E->D
+    {681, 49},     // Edge 14: D->C
+    {730, 49},     // Edge 15: C->B
+    {779, 49},     // Edge 16: B->A
+    {828, 57}      // Edge 17: A->F
   };
   
   fadeToBlackBy(leds, NUM_LEDS, 15);
@@ -743,74 +770,104 @@ void flames() {
 // Pattern 8: Music Beat (VU meter style) - 130 BPM
 void musicBeat() {
   const unsigned long BEAT_CYCLE_MS = 462; // 130 BPM = 462ms per beat
-  const uint8_t NUM_SIDES = 6;
-  const unsigned long SIDE_OFFSET_MS = 77; // Offset between sides (462ms / 6)
   
-  // Calculate elapsed time
+  // Edge definitions matching the geometry (first LED died)
+  const uint16_t edgeStarts[18] = {0, 47, 96, 145, 194, 243, 292, 341, 389, 438, 486, 535, 584, 632, 681, 730, 779, 828};
+  const uint8_t edgeLengths[18] = {47, 49, 49, 49, 49, 49, 49, 48, 49, 48, 49, 49, 48, 49, 49, 49, 49, 57};
+  
+  // Calculate elapsed time and beat level (same for all edges - synchronized)
   unsigned long currentTime = millis();
   unsigned long elapsed = currentTime - mbStartTime;
+  unsigned long cycleTime = elapsed % BEAT_CYCLE_MS;
+  float progress = (float)cycleTime / (float)BEAT_CYCLE_MS;
   
-  // Calculate beat level for sides with offsets
-  for (uint16_t i = 0; i < NUM_LEDS; i++) {
-    float ledY = getLEDYPosition(i);
-    float yNorm = (ledY + 17.5f) / 35.0f; // Normalize 0-1
+  float level;
+  if (progress < 0.1f) {
+    // Quick rise (attack)
+    level = progress / 0.1f;
+  } else {
+    // Slower decay
+    level = 1.0f - ((progress - 0.1f) / 0.9f);
+  }
+  level *= 0.95f; // Cap at 95%
+  
+  // Apply same beat level to all edges (synchronized)
+  for (uint8_t edge = 0; edge < 18; edge++) {
+    uint16_t startLED = edgeStarts[edge];
+    uint8_t length = edgeLengths[edge];
     
-    // Simple side mapping (approximate)
-    uint8_t side = (i / 100) % NUM_SIDES;
-    unsigned long sideElapsed = elapsed + (side * SIDE_OFFSET_MS);
-    unsigned long cycleTime = sideElapsed % BEAT_CYCLE_MS;
-    float progress = (float)cycleTime / (float)BEAT_CYCLE_MS;
-    
-    float level;
-    if (progress < 0.1f) {
-      level = progress / 0.1f;
-    } else {
-      level = 1.0f - ((progress - 0.1f) / 0.9f);
-    }
-    level *= 0.95f; // Cap at 95%
-    
-    if (yNorm <= level) {
-      // VU meter colors: distinct sections - green (bottom) -> yellow (middle) -> red (top)
-      uint8_t r, g;
-      if (yNorm < 0.35f) {
-        // Bottom section: pure green
-        r = 0;
-        g = 255;
-      } else if (yNorm < 0.7f) {
-        // Middle section: pure yellow
-        r = 255;
-        g = 255;
+    // Apply VU meter to this edge from both ends (from corners)
+    for (uint8_t i = 0; i < length; i++) {
+      uint16_t ledIdx = startLED + i;
+      
+      // Distance from nearest end (0 = at node/corner, 1 = at center of edge)
+      float distFromStart = (float)i / (float)length;
+      float distFromEnd = 1.0f - distFromStart;
+      float distFromNearestNode = min(distFromStart, distFromEnd) * 2.0f; // 0 at corners, 1 at center
+      
+      if (distFromNearestNode <= level) {
+        // VU meter colors: green (near corners) -> yellow (middle) -> red (far from corners)
+        uint8_t r, g;
+        if (distFromNearestNode < 0.35f) {
+          // Near corners: pure green
+          r = 0;
+          g = 255;
+        } else if (distFromNearestNode < 0.7f) {
+          // Middle: pure yellow
+          r = 255;
+          g = 255;
+        } else {
+          // Far from corners: pure red
+          r = 255;
+          g = 0;
+        }
+        leds[ledIdx] = CRGB(r, g, 0);
       } else {
-        // Top section (70%+): pure red
-        r = 255;
-        g = 0;
+        leds[ledIdx] = CRGB::Black;
       }
-      leds[i] = CRGB(r, g, 0);
-    } else {
-      leds[i] = CRGB::Black;
     }
   }
 }
 
-// Pattern 9: Cylinder Trace - rectangular pattern around cylinder
+// Pattern 9: Cylinder Trace - rectangular pattern around cylinder following actual edges
 void cylinderTrace() {
-  static float ledAngles[NUM_LEDS];
-  static float ledYPositions[NUM_LEDS];
-  
-  const float HEIGHT = 35.0f;
-  const float MIN_Y = -HEIGHT / 2.0f;
-  const float MAX_Y = HEIGHT / 2.0f;
-  const float SPEED = 0.02f;
+  const float SPEED = 0.5f; // LEDs per frame
   const uint8_t TAIL_LENGTH = 70;
   
-  // Initialize LED cylindrical coordinates once
+  // Define the path following actual edges: up, right, down, right × 3 rectangles
+  // Path: A->G (up), G->H (right), H->B (down), B->I->C (right) to complete first rectangle, etc.
+  // Edges in order: 0(A->G), 1(G->H), 2(H->B), 3(B->I), 4(I->C), 5(C->J), 6(J->D), 7(D->K), 8(K->E), 9(E->L), 10(L->G)
+  // But we want rectangles: up,right,down,right pattern
+  
+  // Define path as sequence of edges to follow for rectangular pattern
+  const uint8_t pathEdges[] = {
+    0,  // A->G (up)
+    1,  // G->H (right at top)
+    2,  // H->B (down)
+    3, 4,  // B->I->C (right at bottom, 2 edges)
+    
+    // Second rectangle
+    5,  // C->J (up)
+    6,  // J->D (right at top)
+    7,  // D->K (down) 
+    8, 9, 11,  // K->E->L->F (right at bottom, 3 edges)
+    
+    // Third rectangle
+    12, // F->E (up)
+    13, // E->D (right at top)
+    14, // D->C (down)
+    15, 16  // C->B->A (right at bottom, 2 edges)
+  };
+  const uint8_t NUM_PATH_EDGES = 17;
+  
+  const uint16_t edgeStarts[] = {0, 47, 96, 145, 194, 243, 292, 341, 389, 438, 486, 535, 584, 632, 681, 730, 779, 828};
+  const uint8_t edgeLengths[] = {47, 49, 49, 49, 49, 49, 49, 48, 49, 48, 49, 49, 48, 49, 49, 49, 49, 57};
+  
+  // Calculate total path length in LEDs
+  static uint16_t totalPathLength = 0;
   if (!ctInitialized) {
-    for (uint16_t i = 0; i < NUM_LEDS; i++) {
-      float ledX, ledY, ledZ;
-      getLED3DPosition(i, ledX, ledY, ledZ);
-      ledYPositions[i] = ledY;
-      ledAngles[i] = atan2(ledZ, ledX);
-      if (ledAngles[i] < 0) ledAngles[i] += TWO_PI;
+    for (uint8_t i = 0; i < NUM_PATH_EDGES; i++) {
+      totalPathLength += edgeLengths[pathEdges[i]];
     }
     ctInitialized = true;
   }
@@ -820,71 +877,36 @@ void cylinderTrace() {
   
   // Update progress
   ctProgress += SPEED;
-  if (ctProgress >= 12.0f) ctProgress = 0.0f;
+  if (ctProgress >= totalPathLength) ctProgress = 0.0f;
   
-  // Pattern: up, right, down, right × 3 rectangles around cylinder
-  const float angleStep = TWO_PI / 6.0f; // 60° per hexagon edge
-  
-  // Create trail positions
+  // Draw trail
   for (uint8_t i = 0; i < TAIL_LENGTH; i++) {
-    float trailProgress = ctProgress - (i * 0.015f);
-    while (trailProgress < 0.0f) trailProgress += 12.0f;
+    float trailPos = ctProgress - (i * 1.0f);
+    if (trailPos < 0.0f) trailPos += totalPathLength;
     
-    uint8_t localPhase = ((uint8_t)trailProgress) % 4;
-    uint8_t rectangleIndex = ((uint8_t)trailProgress) / 4;
-    float phaseProgress = trailProgress - (uint8_t)trailProgress;
-    
-    float targetY, targetAngle;
-    float baseAngle = rectangleIndex * angleStep * 2.0f; // Each rectangle = 2 edges (120°)
-    
-    if (localPhase == 0) {
-      // Going UP
-      targetY = MIN_Y + phaseProgress * HEIGHT;
-      targetAngle = baseAngle;
-    } else if (localPhase == 1) {
-      // Going RIGHT (top ring)
-      targetY = MAX_Y;
-      targetAngle = baseAngle + phaseProgress * angleStep;
-    } else if (localPhase == 2) {
-      // Going DOWN
-      targetY = MAX_Y - phaseProgress * HEIGHT;
-      targetAngle = baseAngle + angleStep;
-    } else {
-      // Going RIGHT (bottom ring)
-      targetY = MIN_Y;
-      targetAngle = baseAngle + angleStep + phaseProgress * angleStep;
-    }
-    
-    // Normalize angle
-    while (targetAngle >= TWO_PI) targetAngle -= TWO_PI;
-    
-    // Find closest LED to this trail position
-    float closestDist = 10000.0f;
-    int16_t closestLED = -1;
-    
-    for (uint16_t led = 0; led < NUM_LEDS; led++) {
-      // Calculate angular distance (accounting for wrap-around)
-      float angleDiff = fabsf(ledAngles[led] - targetAngle);
-      if (angleDiff > PI) angleDiff = TWO_PI - angleDiff;
+    // Find which edge and position within edge
+    float accumulatedLength = 0.0f;
+    for (uint8_t e = 0; e < NUM_PATH_EDGES; e++) {
+      uint8_t edgeIdx = pathEdges[e];
+      uint8_t edgeLen = edgeLengths[edgeIdx];
       
-      float yDiff = fabsf(ledYPositions[led] - targetY);
-      float dist = sqrtf(angleDiff * angleDiff + (yDiff / HEIGHT) * (yDiff / HEIGHT));
-      
-      if (dist < closestDist) {
-        closestDist = dist;
-        closestLED = led;
+      if (trailPos < accumulatedLength + edgeLen) {
+        // This trail point is on this edge
+        float posInEdge = trailPos - accumulatedLength;
+        uint16_t ledIdx = edgeStarts[edgeIdx] + (uint16_t)posInEdge;
+        
+        if (ledIdx < NUM_LEDS) {
+          float intensity = 1.0f - ((float)i / TAIL_LENGTH);
+          float smoothIntensity = intensity * intensity;
+          
+          // Cyan to blue gradient
+          float hue = 0.5f + (1.0f - intensity) * 0.2f;
+          CHSV color = CHSV((uint8_t)(hue * 255), 255, (uint8_t)(smoothIntensity * 255));
+          leds[ledIdx] += color;
+        }
+        break;
       }
-    }
-    
-    // Light up the closest LED
-    if (closestLED >= 0) {
-      float intensity = 1.0f - ((float)i / TAIL_LENGTH);
-      float smoothIntensity = intensity * intensity;
-      
-      // Cyan to blue gradient
-      float hue = 0.5f + (1.0f - intensity) * 0.2f;
-      CHSV color = CHSV((uint8_t)(hue * 255), 255, (uint8_t)(smoothIntensity * 255));
-      leds[closestLED] += color;
+      accumulatedLength += edgeLen;
     }
   }
 }
@@ -896,13 +918,10 @@ void shockwave() {
   const float MAX_RADIUS = 50.0f;
   const float EXPAND_SPEED = 0.5f;
   const float FADE_SPEED = 1.0f / 60.0f; // 1 second fade
-  const uint16_t SPAWN_INTERVAL = 120; // 2 seconds
+  const uint16_t SPAWN_INTERVAL = 120; // 2 seconds between waves
   
-  swFrameCounter++;
-  
-  // Spawn new wave
-  if (swFrameCounter >= SPAWN_INTERVAL) {
-    swFrameCounter = 0;
+  // Spawn new wave at start or after interval
+  if (swFrameCounter == 0 || swFrameCounter >= SPAWN_INTERVAL) {
     for (uint8_t i = 0; i < MAX_WAVES; i++) {
       if (!waves[i].active) {
         waves[i].radius = 0.0f;
@@ -911,7 +930,12 @@ void shockwave() {
         break;
       }
     }
+    if (swFrameCounter >= SPAWN_INTERVAL) {
+      swFrameCounter = 1; // Reset to 1 to avoid immediate re-trigger
+    }
   }
+  
+  swFrameCounter++;
   
   // Fade all LEDs
   for (uint16_t i = 0; i < NUM_LEDS; i++) {
@@ -1106,7 +1130,7 @@ void spiralSphere() {
 
 // Fireworks - spherical explosions that expand and contract in 3D space
 void fireworksAnim() {
-  const uint16_t SPAWN_INTERVAL = 20; // Spawn new firework every 20 frames (matches JS)
+  const uint16_t SPAWN_INTERVAL = 90; // Spawn new firework every 90 frames (less frequent)
   
   fwFrameCounter++;
   
@@ -1131,9 +1155,9 @@ void fireworksAnim() {
     }
   }
   
-  // Fade all LEDs (fade speed 8 to match JS)
+  // Fade all LEDs (faster fade for cleaner look)
   for (uint16_t i = 0; i < NUM_LEDS; i++) {
-    leds[i].fadeToBlackBy(8);
+    leds[i].fadeToBlackBy(15);
   }
   
   // Update and render fireworks
@@ -1147,9 +1171,9 @@ void fireworksAnim() {
         fireworks[f].phase = 1; // Switch to contracting
       }
     } else {
-      // Contracting phase
+      // Contracting phase - fade faster
       fireworks[f].radius -= fireworks[f].speed * 1.5f;
-      fireworks[f].intensity -= 0.05f;
+      fireworks[f].intensity -= 0.12f; // Fade faster (was 0.05f)
       
       if (fireworks[f].radius <= 0.0f || fireworks[f].intensity <= 0.0f) {
         fireworks[f].active = false;
@@ -1176,8 +1200,8 @@ void fireworksAnim() {
         float distFromShell = fabsf(dist - fireworks[f].radius);
         float intensity = (1.0f - distFromShell / shellThickness) * fireworks[f].intensity;
         
-        // Mix color with white based on intensity (smaller white core)
-        float whiteMix = pow(intensity, 3.0f) * 0.5f; // Cubic curve
+        // Mix color with white based on intensity (less white)
+        float whiteMix = pow(intensity, 4.0f) * 0.3f; // Less white overall
         
         CRGB color = fireworks[f].color;
         uint8_t r = (color.r * (1.0f - whiteMix) + 255 * whiteMix) * intensity;
@@ -1204,7 +1228,6 @@ void edgeWalker() {
   };
   
   static Walker walker;
-  static bool initialized = false;
   
   // Edge data structure (reuse from Multi Walker)
   struct EdgeData {
@@ -1215,24 +1238,24 @@ void edgeWalker() {
   };
   
   const EdgeData edges[18] = {
-    {0, 6, 0, 48},       // Edge 0: A->G
-    {6, 7, 48, 49},      // Edge 1: G->H
-    {7, 1, 97, 49},      // Edge 2: H->B
-    {1, 8, 146, 49},     // Edge 3: B->I
-    {8, 2, 195, 49},     // Edge 4: I->C
-    {2, 9, 244, 50},     // Edge 5: C->J
-    {9, 3, 294, 49},     // Edge 6: J->D
-    {3, 10, 343, 48},    // Edge 7: D->K
-    {10, 4, 391, 49},    // Edge 8: K->E
-    {4, 11, 440, 48},    // Edge 9: E->L
-    {11, 6, 488, 49},    // Edge 10: L->G
-    {11, 5, 537, 49},    // Edge 11: L->F
-    {5, 4, 586, 48},     // Edge 12: F->E
-    {4, 3, 634, 49},     // Edge 13: E->D
-    {3, 2, 683, 49},     // Edge 14: D->C
-    {2, 1, 732, 49},     // Edge 15: C->B
-    {1, 0, 781, 49},     // Edge 16: B->A
-    {0, 5, 830, 57}      // Edge 17: A->F
+    {0, 6, 0, 47},       // Edge 0: A->G (first LED died)
+    {6, 7, 47, 49},      // Edge 1: G->H
+    {7, 1, 96, 49},      // Edge 2: H->B
+    {1, 8, 145, 49},     // Edge 3: B->I
+    {8, 2, 194, 49},     // Edge 4: I->C
+    {2, 9, 243, 49},     // Edge 5: C->J
+    {9, 3, 292, 49},     // Edge 6: J->D
+    {3, 10, 341, 48},    // Edge 7: D->K
+    {10, 4, 389, 49},    // Edge 8: K->E
+    {4, 11, 438, 48},    // Edge 9: E->L
+    {11, 6, 486, 49},    // Edge 10: L->G
+    {11, 5, 535, 49},    // Edge 11: L->F
+    {5, 4, 584, 48},     // Edge 12: F->E
+    {4, 3, 632, 49},     // Edge 13: E->D
+    {3, 2, 681, 49},     // Edge 14: D->C
+    {2, 1, 730, 49},     // Edge 15: C->B
+    {1, 0, 779, 49},     // Edge 16: B->A
+    {0, 5, 828, 57}      // Edge 17: A->F
   };
   
   // Node connections
@@ -1251,13 +1274,13 @@ void edgeWalker() {
     {9, 10, 11, 255, 255, 255}        // L
   };
   
-  if (!initialized) {
+  if (!ewInitialized) {
     walker.currentEdgeId = 0;
     walker.ledPositionInEdge = 0;
     walker.speed = 2.0f;
     walker.previousNodeId = edges[0].fromNode;
     walker.tailLength = 15;
-    initialized = true;
+    ewInitialized = true;
   }
   
   // Fade all LEDs
@@ -1351,7 +1374,6 @@ void multiWalker() {
   };
   
   static Walker walkers[10];
-  static bool initialized = false;
   
   // Edge data structure
   struct EdgeData {
@@ -1362,24 +1384,24 @@ void multiWalker() {
   };
   
   const EdgeData edges[18] = {
-    {0, 6, 0, 48},       // Edge 0: A->G
-    {6, 7, 48, 49},      // Edge 1: G->H
-    {7, 1, 97, 49},      // Edge 2: H->B
-    {1, 8, 146, 49},     // Edge 3: B->I
-    {8, 2, 195, 49},     // Edge 4: I->C
-    {2, 9, 244, 50},     // Edge 5: C->J
-    {9, 3, 294, 49},     // Edge 6: J->D
-    {3, 10, 343, 48},    // Edge 7: D->K
-    {10, 4, 391, 49},    // Edge 8: K->E
-    {4, 11, 440, 48},    // Edge 9: E->L
-    {11, 6, 488, 49},    // Edge 10: L->G
-    {11, 5, 537, 49},    // Edge 11: L->F
-    {5, 4, 586, 48},     // Edge 12: F->E
-    {4, 3, 634, 49},     // Edge 13: E->D
-    {3, 2, 683, 49},     // Edge 14: D->C
-    {2, 1, 732, 49},     // Edge 15: C->B
-    {1, 0, 781, 49},     // Edge 16: B->A
-    {0, 5, 830, 57}      // Edge 17: A->F
+    {0, 6, 0, 47},       // Edge 0: A->G (first LED died)
+    {6, 7, 47, 49},      // Edge 1: G->H
+    {7, 1, 96, 49},      // Edge 2: H->B
+    {1, 8, 145, 49},     // Edge 3: B->I
+    {8, 2, 194, 49},     // Edge 4: I->C
+    {2, 9, 243, 49},     // Edge 5: C->J
+    {9, 3, 292, 49},     // Edge 6: J->D
+    {3, 10, 341, 48},    // Edge 7: D->K
+    {10, 4, 389, 49},    // Edge 8: K->E
+    {4, 11, 438, 48},    // Edge 9: E->L
+    {11, 6, 486, 49},    // Edge 10: L->G
+    {11, 5, 535, 49},    // Edge 11: L->F
+    {5, 4, 584, 48},     // Edge 12: F->E
+    {4, 3, 632, 49},     // Edge 13: E->D
+    {3, 2, 681, 49},     // Edge 14: D->C
+    {2, 1, 730, 49},     // Edge 15: C->B
+    {1, 0, 779, 49},     // Edge 16: B->A
+    {0, 5, 828, 57}      // Edge 17: A->F
   };
   
   // Node connections: list of connected edge IDs for each node (0-11 = A-L)
@@ -1398,7 +1420,7 @@ void multiWalker() {
     {9, 10, 11, 255, 255, 255}        // L: edges 9, 10, 11
   };
   
-  if (!initialized) {
+  if (!mwInitialized) {
     for (uint8_t i = 0; i < 10; i++) {
       uint8_t randomEdge = random(18);
       const EdgeData &edge = edges[randomEdge];
@@ -1422,7 +1444,7 @@ void multiWalker() {
         walkers[i].previousNodeId = edge.fromNode;
       }
     }
-    initialized = true;
+    mwInitialized = true;
   }
   
   // Fade all LEDs
@@ -1541,11 +1563,10 @@ void colorFlood() {
   static uint8_t holdCounter = 0;
   
   // Initialize on first call
-  static bool initialized = false;
-  if (!initialized) {
+  if (!cfInitialized) {
     currentNodeIndex = random(12);
     targetColor = CHSV(random(256), 255, 128);
-    initialized = true;
+    cfInitialized = true;
   }
   
   // State machine
@@ -1624,11 +1645,10 @@ void rainbowFlood() {
   static uint8_t holdCounter = 0;
   
   // Initialize on first call
-  static bool initialized = false;
-  if (!initialized) {
+  if (!rfInitialized) {
     currentNodeIndex = random(12);
     startHue = random(256);
-    initialized = true;
+    rfInitialized = true;
   }
   
   // State machine
@@ -1699,12 +1719,12 @@ void getLED3DPosition(uint16_t ledIndex, float& x, float& y, float& z) {
   
   // Edge definitions: from, to, ledCount
   const uint8_t edges[18][3] = {
-    {0, 6, 48},   // A->G
+    {0, 6, 47},   // A->G (first LED died)
     {6, 7, 49},   // G->H
     {7, 1, 49},   // H->B
     {1, 8, 49},   // B->I
     {8, 2, 49},   // I->C
-    {2, 9, 50},   // C->J
+    {2, 9, 49},   // C->J
     {9, 3, 49},   // J->D
     {3, 10, 48},  // D->K
     {10, 4, 49},  // K->E
@@ -1748,114 +1768,114 @@ float getLEDYPosition(uint16_t ledIndex) {
   const float MAX_Y = HEIGHT / 2.0f;
   
   // Path: A->G->H->B->I->C->J->D->K->E->L->G->L->F->E->D->C->B->A->F
-  // 18 edges with VERIFIED LED counts = 888 total LEDs
-  // Edge counts: 48,49,49,49,49,50,49,48,49,48,49,49,48,49,49,49,49,57
+  // 18 edges with VERIFIED LED counts = 886 total LEDs (first LED died)
+  // Edge counts: 47,49,49,49,49,49,49,48,49,48,49,49,48,49,49,49,49,57
   
   uint16_t idx = ledIndex;
   
-  // Edge 0: A->G (0-47) - 48 LEDs - vertical up [VERIFIED]
-  if (idx < 48) {
-    return MIN_Y + ((float)idx / 48.0f) * HEIGHT;
+  // Edge 0: A->G (0-46) - 47 LEDs - vertical up [First LED died]
+  if (idx < 47) {
+    return MIN_Y + ((float)idx / 47.0f) * HEIGHT;
   }
-  idx -= 48;
+  idx -= 47;
   
-  // Edge 1: G->H (48-96) - 49 LEDs - top ring (horizontal) [VERIFIED]
+  // Edge 1: G->H (47-95) - 49 LEDs - top ring (horizontal) [VERIFIED]
   if (idx < 49) {
     return MAX_Y;
   }
   idx -= 49;
   
-  // Edge 2: H->B (97-145) - 49 LEDs - vertical down [VERIFIED]
+  // Edge 2: H->B (96-144) - 49 LEDs - vertical down [VERIFIED]
   if (idx < 49) {
     return MAX_Y - ((float)idx / 49.0f) * HEIGHT;
   }
   idx -= 49;
   
-  // Edge 3: B->I (146-194) - 49 LEDs - top ring (horizontal) [VERIFIED]
+  // Edge 3: B->I (145-193) - 49 LEDs - top ring (horizontal) [VERIFIED]
   if (idx < 49) {
     return MAX_Y;
   }
   idx -= 49;
   
-  // Edge 4: I->C (195-243) - 49 LEDs - vertical down [VERIFIED]
+  // Edge 4: I->C (194-242) - 49 LEDs - vertical down [VERIFIED]
   if (idx < 49) {
     return MAX_Y - ((float)idx / 49.0f) * HEIGHT;
   }
   idx -= 49;
   
-  // Edge 5: C->J (244-293) - 50 LEDs - top ring (horizontal) [VERIFIED]
-  if (idx < 50) {
+  // Edge 5: C->J (243-291) - 49 LEDs - top ring (horizontal) [VERIFIED]
+  if (idx < 49) {
     return MAX_Y;
   }
-  idx -= 50;
+  idx -= 49;
   
-  // Edge 6: J->D (294-342) - 49 LEDs - vertical down [VERIFIED]
+  // Edge 6: J->D (292-340) - 49 LEDs - vertical down [VERIFIED]
   if (idx < 49) {
     return MAX_Y - ((float)idx / 49.0f) * HEIGHT;
   }
   idx -= 49;
   
-  // Edge 7: D->K (343-390) - 48 LEDs - top ring (horizontal) [VERIFIED - has faulty LED]
-  if (idx < 48) {
-    return MAX_Y;
-  }
-  idx -= 48;
-  
-  // Edge 8: K->E (391-439) - 49 LEDs - vertical down [VERIFIED]
-  if (idx < 49) {
-    return MAX_Y - ((float)idx / 49.0f) * HEIGHT;
-  }
-  idx -= 49;
-  
-  // Edge 9: E->L (440-487) - 48 LEDs - top ring (horizontal) [VERIFIED]
+  // Edge 7: D->K (341-388) - 48 LEDs - top ring (horizontal) [VERIFIED - has faulty LED]
   if (idx < 48) {
     return MAX_Y;
   }
   idx -= 48;
   
-  // Edge 10: L->G (488-536) - 49 LEDs - top ring (horizontal) [VERIFIED]
-  if (idx < 49) {
-    return MAX_Y;
-  }
-  idx -= 49;
-  
-  // Edge 11: L->F (537-585) - 49 LEDs - vertical down [VERIFIED - has faulty LED]
+  // Edge 8: K->E (389-437) - 49 LEDs - vertical down [VERIFIED]
   if (idx < 49) {
     return MAX_Y - ((float)idx / 49.0f) * HEIGHT;
   }
   idx -= 49;
   
-  // Edge 12: F->E (586-633) - 48 LEDs - bottom ring (horizontal) [VERIFIED]
+  // Edge 9: E->L (438-485) - 48 LEDs - top ring (horizontal) [VERIFIED]
+  if (idx < 48) {
+    return MAX_Y;
+  }
+  idx -= 48;
+  
+  // Edge 10: L->G (486-534) - 49 LEDs - top ring (horizontal) [VERIFIED]
+  if (idx < 49) {
+    return MAX_Y;
+  }
+  idx -= 49;
+  
+  // Edge 11: L->F (535-583) - 49 LEDs - vertical down [VERIFIED - has faulty LED]
+  if (idx < 49) {
+    return MAX_Y - ((float)idx / 49.0f) * HEIGHT;
+  }
+  idx -= 49;
+  
+  // Edge 12: F->E (584-631) - 48 LEDs - bottom ring (horizontal) [VERIFIED]
   if (idx < 48) {
     return MIN_Y;
   }
   idx -= 48;
   
-  // Edge 13: E->D (634-682) - 49 LEDs - bottom ring (horizontal) [VERIFIED]
+  // Edge 13: E->D (632-680) - 49 LEDs - bottom ring (horizontal) [VERIFIED]
   if (idx < 49) {
     return MIN_Y;
   }
   idx -= 49;
   
-  // Edge 14: D->C (683-731) - 49 LEDs - bottom ring (horizontal) [VERIFIED]
+  // Edge 14: D->C (681-729) - 49 LEDs - bottom ring (horizontal) [VERIFIED]
   if (idx < 49) {
     return MIN_Y;
   }
   idx -= 49;
   
-  // Edge 15: C->B (732-780) - 49 LEDs - bottom ring (horizontal) [VERIFIED]
+  // Edge 15: C->B (730-778) - 49 LEDs - bottom ring (horizontal) [VERIFIED]
   if (idx < 49) {
     return MIN_Y;
   }
   idx -= 49;
   
-  // Edge 16: B->A (781-829) - 49 LEDs - bottom ring (horizontal) [VERIFIED]
+  // Edge 16: B->A (779-827) - 49 LEDs - bottom ring (horizontal) [VERIFIED]
   if (idx < 49) {
     return MIN_Y;
   }
   idx -= 49;
   
-  // Edge 17: A->F (830-886) - 57 LEDs - bottom ring (horizontal) [VERIFIED]
+  // Edge 17: A->F (828-884) - 57 LEDs - bottom ring (horizontal) [VERIFIED]
   if (idx < 57) {
     return MIN_Y;
   }
